@@ -1,0 +1,67 @@
+
+syntax = "proto3";
+
+package inventory.v1;
+
+// The RPC contract exposed by Inventory Service.
+service InventoryService {
+
+  rpc GetStock(GetStockRequest)
+      returns (GetStockResponse);
+
+  // Additive batch read for product pages. Unknown products are omitted.
+  rpc GetStocks(GetStocksRequest)
+      returns (GetStocksResponse);
+
+  rpc ReserveStock(ReserveStockRequest)
+      returns (ReserveStockResponse);
+
+  rpc ReleaseStock(ReleaseStockRequest)
+      returns (ReleaseStockResponse);
+}
+
+// Represents a product and a requested quantity.
+message StockItem {
+  int64 product_id = 1;
+  int32 quantity = 2;
+}
+
+// Get the available stock of a product.
+message GetStockRequest {
+  int64 product_id = 1;
+}
+
+message GetStockResponse {
+  int64 product_id = 1;
+  int32 available_quantity = 2;
+}
+
+message GetStocksRequest {
+  repeated int64 product_ids = 1;
+}
+
+message GetStocksResponse {
+  repeated GetStockResponse items = 1;
+}
+
+// Reserve all requested items atomically.
+message ReserveStockRequest {
+  string reservation_id = 1;
+  repeated StockItem items = 2;
+}
+
+message ReserveStockResponse {
+  string reservation_id = 1;
+  repeated StockItem reserved_items = 2;
+}
+
+// Release a reservation, or durably cancel an ID before a delayed reserve.
+// Repeating release succeeds without restoring stock twice.
+message ReleaseStockRequest {
+  string reservation_id = 1;
+}
+
+message ReleaseStockResponse {
+  string reservation_id = 1;
+}
+  

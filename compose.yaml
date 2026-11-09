@@ -1,0 +1,110 @@
+x-inventory-env: &inventory-env
+  NODE_ENV: production
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_USERNAME: ${INVENTORY_DB_USER:-inventory_app}
+  DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?set INVENTORY_DB_PASSWORD}
+  DB_DATABASE: ${INVENTORY_DB_NAME:-inventory}
+  GRPC_BIND: 0.0.0.0:50051
+  INVENTORY_PROTO_PATH: proto/inventory.proto
+
+x-main-env: &main-env
+  NODE_ENV: production
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_USERNAME: ${MAIN_DB_USER:-main_api}
+  DB_PASSWORD: ${MAIN_DB_PASSWORD:?set MAIN_DB_PASSWORD}
+  DB_DATABASE: ${MAIN_DB_NAME:-ecommerce}
+  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+  JWT_ACCESS_TTL_SECONDS: 900
+  JWT_ISSUER: ecommerce-api
+  JWT_AUDIENCE: ecommerce-client
+  INVENTORY_GRPC_URL: inventory:50051
+  INVENTORY_PROTO_PATH: proto/inventory.proto
+  INVENTORY_COMPENSATION_INTERVAL_MS: 5000
+  PORT: 3000
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?set POSTGRES_ADMIN_PASSWORD}
+      MAIN_DB_USER: ${MAIN_DB_USER:-main_api}
+      MAIN_DB_PASSWORD: ${MAIN_DB_PASSWORD:?set MAIN_DB_PASSWORD}
+      MAIN_DB_NAME: ${MAIN_DB_NAME:-ecommerce}
+      INVENTORY_DB_USER: ${INVENTORY_DB_USER:-inventory_app}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?set INVENTORY_DB_PASSWORD}
+      INVENTORY_DB_NAME: ${INVENTORY_DB_NAME:-inventory}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/init-databases.sh:/docker-entrypoint-initdb.d/01-app-databases.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres -d postgres]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  inventory-migrate:
+    build: .
+    image: inventory-local
+    environment: *inventory-env
+    command:
+      [
+        node,
+        node_modules/typeorm/cli.js,
+        migration:run,
+        -d,
+        dist/database/data-source.js,
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  inventory:
+    image: inventory-local
+    environment: *inventory-env
+    expose: ['50051']
+    depends_on:
+      inventory-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, node, scripts/healthcheck.cjs]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  main-migrate:
+    build:
+      context: ../e-commerce
+      target: runtime
+    image: ecommerce-local
+    environment: *main-env
+    command:
+      [
+        node,
+        node_modules/typeorm/cli.js,
+        migration:run,
+        -d,
+        dist/data-source.js,
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: ecommerce-local
+    environment: *main-env
+    ports: ['127.0.0.1:${API_PORT:-3000}:3000']
+    depends_on:
+      main-migrate:
+        condition: service_completed_successfully
+      inventory:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
