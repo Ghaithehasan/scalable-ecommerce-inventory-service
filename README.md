@@ -1,7 +1,7 @@
 # Inventory Microservice
 
-NestJS + CommonJS + PostgreSQL/TypeORM + gRPC. المخزون والحجوزات ملك هذه الخدمة حصراً.
-الـ Main API الموجود في `../e-commerce` يملك المستخدمين والمنتجات والأسعار والطلبات، ويقرأ/يحجز المخزون عبر gRPC.
+NestJS + CommonJS + PostgreSQL/TypeORM + gRPC. This service exclusively owns stock quantities and inventory reservations.
+The Main API in `../e-commerce` owns users, products, prices, and orders, and reads or reserves inventory through gRPC.
 
 ```mermaid
 flowchart LR
@@ -11,22 +11,13 @@ flowchart LR
   Inventory --> InventoryDB[(Inventory DB)]
 ```
 
-## التشغيل محلياً
+## Local setup
 
-تحتاج Node.js 24 وPostgreSQL. استخدم قاعدة مستقلة وحساباً مستقلاً لكل تطبيق.
-ملف `.env.example` يشرح المتغيرات؛ املأ ملفك المحلي ولا تضع أسرارك في Git.
-لم يتم تعديل ملفات `.env` الحقيقية أثناء تنفيذ هذا العمل.
+You need Node.js 24 and PostgreSQL. Use a separate database and database account for each application.
+The `.env.example` file documents the settings. Fill in your local environment files and keep secrets out of Git.
+Real `.env` files were not modified during this implementation.
 
-من مجلد Inventory، على PowerShell:
-
-```powershell
-npm.cmd ci
-npm.cmd run build
-npm.cmd run migration:run
-npm.cmd run start:dev
-```
-
-ومن ترمينال آخر داخل `../e-commerce`:
+From the Inventory directory, using PowerShell:
 
 ```powershell
 npm.cmd ci
@@ -35,7 +26,16 @@ npm.cmd run migration:run
 npm.cmd run start:dev
 ```
 
-على Linux استخدم `npm` مكان `npm.cmd`. الـ Main API يقرأ إعدادات gRPC من ملفه الخاص:
+In another terminal, inside `../e-commerce`:
+
+```powershell
+npm.cmd ci
+npm.cmd run build
+npm.cmd run migration:run
+npm.cmd run start:dev
+```
+
+On Linux, use `npm` instead of `npm.cmd`. The Main API reads its gRPC settings from its own environment file:
 
 ```dotenv
 INVENTORY_GRPC_URL=127.0.0.1:50051
@@ -48,68 +48,68 @@ INVENTORY_COMPENSATION_INTERVAL_MS=5000
 INVENTORY_COMPENSATION_RETRY_MS=5000
 ```
 
-لا تستخدم `synchronize: true`. قواعد موجودة أُنشئت سابقاً بواسطة synchronize تحتاج مطابقة schema ومراجعة سجل migrations قبل تشغيل initial migration؛ لا تشغّل إنشاء الجداول فوق جداول موجودة عشوائياً.
+Do not use `synchronize: true`. If an existing database was created with schema synchronization, reconcile its schema and migration history before running the initial migration. Do not blindly run table-creation migrations against existing tables.
 
-إنشاء منتج لا ينشئ كمية تلقائياً: إدارة الكميات تابعة لـ Inventory. بعد إنشاء منتجات في Main، يمكن تجهيز سجلاتها الأولية من Inventory:
+Creating a product does not automatically create its stock record: quantities belong to Inventory. After creating products in Main, provision their initial stock records from Inventory:
 
 ```powershell
 npm.cmd run seed:stock -- 1:20 2:10
 ```
 
-هذا الأمر يضيف السجلات الناقصة فقط، ولا يغيّر كمية موجودة ولا يعمل تلقائياً عند الإقلاع.
+This command inserts missing records only. It preserves existing quantities and does not run automatically at startup.
 
-## العقد والملكية
+## Contract and ownership
 
-`proto/inventory.proto` هو العقد الأساسي. نسخة Main في `../e-commerce/proto/inventory.proto` مطابقة له.
-بقيت `package inventory.v1` وأسماء RPCs وأرقام الحقول القديمة ثابتة.
+`proto/inventory.proto` is the authoritative contract. Main has an identical copy at `../e-commerce/proto/inventory.proto`.
+The existing `package inventory.v1`, RPC names, and field numbers remain unchanged.
 
-| RPC            | السلوك                                                                         |
-| -------------- | ------------------------------------------------------------------------------ |
-| `GetStock`     | كمية منتج واحد، أو `NOT_FOUND`                                                 |
-| `GetStocks`    | إضافة متوافقة لقراءة صفحة منتجات بطلب واحد؛ المنتجات المجهولة تُحذف من القائمة |
-| `ReserveStock` | حجز جميع العناصر أو rollback لجميعها                                           |
-| `ReleaseStock` | إرجاع الحجز مرة واحدة، أو تسجيل إلغاء دائم لحجز لم يصل بعد                     |
+| RPC            | Behavior                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------ |
+| `GetStock`     | Returns one product's available quantity, or `NOT_FOUND`                                   |
+| `GetStocks`    | Backward-compatible batch query for product pages; unknown products are omitted            |
+| `ReserveStock` | Reserves every requested item, or rolls back the entire reservation                        |
+| `ReleaseStock` | Restores a reservation once, or durably cancels an ID before a delayed reservation arrives |
 
-الأسماء داخل TypeScript هي camelCase بفضل `keepCase: false`، ومعرّفات `int64` دائماً strings بفضل `longs: String`.
-لا تحول معرّف Inventory إلى JavaScript number. الحد الأعلى هو `9223372036854775807`.
-تُطبَّع الأرقام إلى الصيغة العشرية القياسية، وتُرفض المنتجات المكررة بعد التطبيع.
-الطلب الواحد يقبل حتى 100 منتج، والكمية عدد صحيح موجب ضمن `int32`.
+TypeScript field names use camelCase through `keepCase: false`. Product IDs use strings through `longs: String`.
+Do not convert Inventory IDs to JavaScript numbers. The maximum supported ID is `9223372036854775807`.
+IDs are normalized to canonical decimal strings, and duplicate products are rejected after normalization.
+A request accepts up to 100 products, with positive integer quantities within the `int32` range.
 
-أكواد الأخطاء: `INVALID_ARGUMENT` للمدخلات، `NOT_FOUND` للسجل المفقود، `FAILED_PRECONDITION` لنقص الكمية/الحجز المنتهي، `ALREADY_EXISTS` لإعادة استخدام حجز فعال بمحتوى مختلف، `ABORTED` لتعارض معاملات/مهلة قفل قابلة لإعادة المحاولة بنفس الهوية، و`UNAVAILABLE` لتعطل قاعدة المخزون.
-الأخطاء غير المتوقعة تصبح `INTERNAL` دون تفاصيل SQL للعميل.
+Error codes are `INVALID_ARGUMENT` for invalid input, `NOT_FOUND` for missing records, `FAILED_PRECONDITION` for insufficient stock or a terminal reservation, `ALREADY_EXISTS` for reusing an active reservation ID with different items, `ABORTED` for transaction conflicts or lock timeouts that can be retried with the same identity, and `UNAVAILABLE` when the Inventory database is unavailable.
+Unexpected errors become `INTERNAL` without exposing SQL details to clients.
 
-## حالات الحجز ومنع السباقات
+## Reservation states and concurrency
 
-| الحالة الحالية | ReserveStock                                            | ReleaseStock                                |
-| -------------- | ------------------------------------------------------- | ------------------------------------------- |
-| لا يوجد سجل    | إنشاء `RESERVED` مع خصم كل الكميات في transaction واحدة | إنشاء `CANCELLED` بدون عناصر أو تعديل كميات |
-| `RESERVED`     | نفس المحتوى: إعادة النتيجة؛ محتوى مختلف: conflict       | إرجاع الكميات ثم التحول إلى `RELEASED`      |
-| `RELEASED`     | رفض إعادة الاستخدام                                     | نجاح بدون زيادة إضافية                      |
-| `CANCELLED`    | رفض الحجز المتأخر                                       | نجاح بدون تغيير                             |
+| Current state | ReserveStock                                                     | ReleaseStock                                       |
+| ------------- | ---------------------------------------------------------------- | -------------------------------------------------- |
+| No record     | Creates `RESERVED` and deducts every quantity in one transaction | Creates `CANCELLED` without items or stock changes |
+| `RESERVED`    | Same items: returns the stored result; different items: conflict | Restores quantities and transitions to `RELEASED`  |
+| `RELEASED`    | Rejects reuse                                                    | Succeeds without restoring quantities again        |
+| `CANCELLED`   | Rejects the delayed reservation                                  | Succeeds without changes                           |
 
-كل من Reserve وRelease يبدأ بـ `INSERT ... ON CONFLICT DO NOTHING` على نفس المفتاح الفريد، ثم `SELECT ... FOR UPDATE` لنفس سجل الحجز.
-قفل سجل غير موجود وحده لا يكفي، لذلك الإدخال وقيد uniqueness جزء أساسي من البروتوكول.
+Both Reserve and Release begin with `INSERT ... ON CONFLICT DO NOTHING` on the same unique key, followed by `SELECT ... FOR UPDATE` on the reservation row.
+A row lock alone cannot protect a record that does not exist, so insertion and database uniqueness are essential parts of the protocol.
 
-إذا وصل الإلغاء أولاً:
+When cancellation arrives first:
 
-1. يسجل `CANCELLED` ويعمل commit.
-2. يصل الحجز المتأخر ويحاول إدخال نفس `reservation_id`.
-3. القيد الفريد يمنع إنشاء سجل جديد.
-4. الحجز يقرأ `CANCELLED` تحت القفل ويرفض قبل خصم أي كمية.
+1. Release records `CANCELLED` and commits.
+2. The delayed reservation attempts to insert the same `reservation_id`.
+3. The unique constraint prevents a new record from being created.
+4. Reserve reads `CANCELLED` under the row lock and rejects the request before deducting stock.
 
-إذا بدأ الحجز أولاً، فالإلغاء ينتظر إدخاله/قفل سجله حتى commit أو rollback. بعد نجاح الحجز يعيد الإلغاء الكميات مرة واحدة؛ وبعد فشل الحجز ينشئ الإلغاء tombstone.
-الإلغاء المتزامن ينتظر نفس السجل ثم يرى الحالة النهائية.
+When reservation starts first, Release waits for its insertion or row lock until commit or rollback. After a successful reservation, Release restores the quantities once; after a failed reservation, Release creates a tombstone.
+Concurrent releases wait on the same record and then observe its terminal state.
 
-الكميات تُعدَّل بواسطة `UPDATE ... WHERE available_quantity >= requested`، وهو الحاجز الأساسي ضد overselling.
-كل عناصر الحجز ضمن transaction واحدة، وبترتيب رقمي ثابت للمنتجات لتقليل deadlocks. قد تبقى deadlocks أخرى، ولذلك تتم ترجمتها إلى `ABORTED`؛ لا يوجد ادعاء بإزالتها بالكامل.
-في PostgreSQL تعيد `manager.query(UPDATE...)` القيمة `[rows, affectedCount]`؛ يتم فحص عدد الصفوف لا طول هذه المصفوفة.
+Stock is deducted using `UPDATE ... WHERE available_quantity >= requested`, the primary protection against overselling.
+Every item belongs to one transaction, and products are processed in a consistent numeric order to reduce deadlocks. Other deadlocks remain possible and are mapped to `ABORTED`.
+With PostgreSQL, `manager.query(UPDATE...)` returns `[rows, affectedCount]`; the implementation checks the affected count rather than the length of this outer array.
 
-قيود قاعدة البيانات تحمي عدم سلبية الكمية، إيجابية كمية العنصر، uniqueness للحجز ولزوج الحجز/المنتج، وFKs داخل قاعدة Inventory.
-لا تحذف tombstones أو سجلات منع التكرار أثناء احتمال وصول رسائل قديمة؛ سياسة الاحتفاظ جزء من ضمان منع إعادة الاستخدام.
+Database constraints enforce nonnegative stock, positive item quantities, unique reservation IDs, unique reservation/product pairs, and foreign keys within the Inventory database.
+Do not delete tombstones or idempotency records while delayed requests could still arrive. A deliberate retention policy is part of the protection against ID reuse.
 
-## الطلبات والتعويض بين قاعدتين
+## Orders and compensation across two databases
 
-يرسل العميل `Idempotency-Key` ثابتاً عند إعادة محاولة نفس طلب HTTP:
+Clients send a stable `Idempotency-Key` when retrying the same logical HTTP request:
 
 ```http
 POST /orders
@@ -120,30 +120,30 @@ Content-Type: application/json
 {"items":[{"productId":1,"quantity":2},{"productId":2,"quantity":1}]}
 ```
 
-نفس المستخدم ونفس المفتاح ونفس العناصر يرجعون نفس الطلب المكتمل. اختلاف العناصر يرجع 409.
-طلب قيد التنفيذ أو التعويض يرجع 409، ويمكن إعادة الاستعلام بنفس المفتاح بإعادة POST.
-عملية ملغاة لا تنشئ طلباً جديداً بنفس المفتاح. المفتاح اختياري للحفاظ على توافق العملاء القدامى، لكن **لا يوجد ضمان منع تكرار طلبات HTTP مستقلة بدونه**.
+The same user, key, and items return the same completed order. Different items return HTTP 409.
+An operation still processing or awaiting compensation returns 409; clients can check again by repeating POST with the same key.
+A cancelled operation cannot create a new order with that key. The header remains optional for compatibility with existing clients, but **independent HTTP requests without it are not protected against duplicate orders**.
 
-التنفيذ:
+The workflow is:
 
-1. التحقق من المنتجات وإتاحتها وأخذ نسخ الأسعار خارج أي اتصال شبكي داخل transaction.
-2. حفظ `inventory_order_operations` في Main DB قبل إرسال gRPC، بهوية حجز UUID ثابتة ونسخة العناصر والأسعار.
-3. استدعاء ReserveStock مرة واحدة لكل السلة، مع deadline صريح.
-4. حفظ Order وOrderItems وتحويل العملية إلى `COMPLETED` في transaction محلية واحدة. قفل العملية يمنع recovery من إلغاء عملية نجح commit الخاص بها.
-5. عند فشل الحجز أو غموض نتيجته أو فشل حفظ الطلب، تحويل العملية الباقية `PENDING` إلى `CANCEL_PENDING` ومحاولة Release بنفس الهوية.
-6. عند فشل Release يبقى السجل دائماً وتعيد background worker المحاولة بهوية الحجز نفسها. لا تُسجَّل `CANCELLED` إلا بعد نجاح gRPC.
+1. Validate products and availability and capture price snapshots before the network call, without holding a database transaction open across gRPC.
+2. Persist `inventory_order_operations` in Main DB before calling gRPC, including a stable reservation UUID and the item/price snapshots.
+3. Call ReserveStock once for the entire basket with an explicit deadline.
+4. Save Order and OrderItems and mark the operation `COMPLETED` in one local transaction. The operation-row lock prevents recovery from cancelling an operation whose commit succeeded.
+5. If reservation fails, its outcome is unknown, or order persistence fails, change the still-`PENDING` operation to `CANCEL_PENDING` and attempt Release with the same identity.
+6. If Release fails, retain the durable operation and let the background worker retry with the same reservation ID. Mark it `CANCELLED` only after gRPC succeeds.
 
-العامل يسترد أيضاً عمليات `PENDING` التي انتهت مهلتها بعد crash. يستخدم `FOR UPDATE SKIP LOCKED` ومواعيد المحاولة في قاعدة البيانات، ويعمل بأمان مع أكثر من instance.
-قفل العملية يفصل بين مسارين: إما Order + `COMPLETED` ينجحان، أو الإلغاء يفوز ويمنع كاتب طلب قديم من إنشاء Order لاحقاً.
-إذا ضاع جواب COMMIT فقد يكون الطلب محفوظاً فعلياً؛ التعويض لا يغيّر عملية `COMPLETED`.
+The worker also recovers expired `PENDING` operations after a crash. It uses `FOR UPDATE SKIP LOCKED` and persisted retry timestamps, and can safely run in multiple instances.
+Operation-row locking coordinates two outcomes: either Order and `COMPLETED` commit together, or cancellation wins and fences a stale order writer.
+If the COMMIT response is lost, the order may already exist; compensation never blindly changes a `COMPLETED` operation.
 
-إلغاء Order يكتب حالة `CANCELLED` وطلب التعويض في transaction Main نفسها. حذف Order غير مشحون يطلب Release أيضاً؛ حذف سجل بيع مشحون/مسلّم لا يعيد بضائع مباعة إلى المخزون.
-حالة Order الملغاة لا تعني أن الشبكة أعادت الكمية فوراً؛ يمكن أن يكون التعويض قيد الانتظار.
+Cancelling an Order writes its `CANCELLED` status and compensation request in the same Main transaction. Deleting an unshipped Order also requests Release; deleting shipped or delivered sales history does not return sold goods to stock.
+A cancelled Order does not imply that stock has already been restored over the network: compensation may still be pending.
 
-القاعدتان لا تشتركان بمعاملة موزعة. الاسترداد هنا eventual ويتطلب عودة Main worker وInventory وقواعدهما للعمل. تعطل دائم أو فقد بيانات يحتاج تدخل المشغل. لا تُحذف سجلات العمليات يدوياً أثناء وجود حجز/تعويض معلق.
-سجلات Main القديمة لها `inventory_reservation_id = NULL` وتبقى متوافقة؛ لا ننسب لها حجوزات لم تحصل فعلياً.
+The databases do not share a distributed transaction. Recovery is eventual and requires the Main worker, Inventory, and their databases to become available again. Permanent outages or data loss require operator intervention. Do not manually delete operations with unresolved reservations or compensation.
+Legacy Main orders retain `inventory_reservation_id = NULL`; no reservations are invented for historical orders.
 
-لمراقبة التعويض داخل Main DB:
+To monitor compensation in Main DB:
 
 ```sql
 SELECT id, status, attempts, last_error_code, next_attempt_at
@@ -152,7 +152,7 @@ WHERE status IN ('PENDING', 'CANCEL_PENDING')
 ORDER BY created_at;
 ```
 
-## الاختبارات
+## Tests
 
 ```powershell
 npm.cmd run build
@@ -161,56 +161,56 @@ npm.cmd test
 npm.cmd run test:db
 ```
 
-`test:db` ينشئ PostgreSQL مؤقتاً باستخدام `initdb` و`pg_ctl` المثبتين، ويبني التطبيقين ويختبر HTTP → gRPC → قاعدتين مستقلتين، ثم يوقف الخادم في `finally`.
-لا يقرأ `.env` لإنشاء قواعد الاختبار ولا يشغّل migrations على قواعد التطبيق.
-على Windows يمكن ضبط `PG_BIN` إذا لم يكن PostgreSQL بمسار التثبيت المعتاد. ملفات PostgreSQL المؤقتة تبقى في مجلد النظام المؤقت للتشخيص.
-على Linux لا يمكن تشغيل initdb كمستخدم root؛ استخدم مستخدماً عادياً أو قواعد الاختبار الصريحة التالية.
+`test:db` starts a disposable PostgreSQL cluster using the installed `initdb` and `pg_ctl` binaries, builds both applications, tests HTTP → gRPC → two independent databases, and stops the server in `finally`.
+It does not read `.env` to provision test databases or run migrations against application databases.
+On Windows, set `PG_BIN` if PostgreSQL is installed outside the default location. Temporary PostgreSQL files remain in the system temporary directory for diagnostics.
+On Linux, initdb cannot run as root; use a regular user or provide dedicated test database URLs as described below.
 
-يمكن توفير `TEST_DATABASE_URL` لقاعدة مخصصة يبدأ اسمها بـ `inventory_test`، و`TEST_MAIN_DATABASE_URL` لقاعدة مخصصة يبدأ اسمها بـ `ecommerce_test`.
-يمنع harness أسماء قواعد التطبيق، ويعزل Inventory في schema خاص، ويعيد تجهيز **قاعدة Main الاختبارية** بين الاختبارات. لا تمرر قاعدة مشتركة أو قاعدة التطبيق حتى لو أعدت تسميتها.
+You can supply `TEST_DATABASE_URL` for a dedicated database named `inventory_test` or `inventory_test_<suffix>`, and `TEST_MAIN_DATABASE_URL` for one named `ecommerce_test` or `ecommerce_test_<suffix>`.
+The harness rejects application database names, isolates Inventory in its own schema, and resets the **dedicated Main test database** between tests. Never supply a shared or application database, even if you rename it.
 
 ```powershell
-# Inventory فقط، إذا لم يكن Main API موجوداً
+# Inventory only, when the Main API is unavailable
 npm.cmd run test:db -- --inventory-only
 
-# Main بمسار مختلف
+# Main API at a different path
 npm.cmd run test:db -- --main-api ../e-commerce
 
-# اختبارات Main HTTP الحالية
+# Existing Main HTTP tests
 Set-Location ../e-commerce
 npm.cmd test -- --runInBand
 npm.cmd run test:e2e -- --runInBand
 ```
 
-إذا منعت Windows Application Control ملف oxlint الأصلي في Main، يمكن فحصه من مجلد Main بواسطة النسخة المثبتة والمسموح تشغيلها في Inventory، بنفس إعدادات Main:
+If Windows Application Control blocks Main's native oxlint binary, run the permitted Inventory installation from Main's directory, using Main's own configuration:
 
 ```powershell
 node ../inventory-service/node_modules/oxlint/bin/oxlint --type-aware src/ test/
 ```
 
-هذا البديل استُخدم بنجاح في الفحص؛ لم يتم تعطيل سياسة Windows.
+This fallback was used successfully during verification without disabling Windows policy.
 
-الاختبارات تغطي القيود الفعلية، rollback متعدد المنتجات، المنافسة على آخر قطعة، طلبات متعددة بنفس الهوية، الإلغاء المتزامن، كلا ترتيبي Reserve/Release، وdeadline بعد commit حقيقي.
-اختبارات النظام تفشل INSERT الطلب فعلياً بواسطة PostgreSQL trigger، وتختبر تعويضاً فاشلاً واسترداده بعامل جديد، crash قبل حفظ الطلب، HTTP idempotency، صلاحيات الطلبات، وكميات المنتجات.
-هوية المستخدم في اختبار النظام تُحقن ببديل JWT؛ يبقى RolesGuard الحقيقي فعالاً. هذا الاختبار ليس اختبار تسجيل دخول JWT كاملاً.
+Tests cover actual constraints, multi-product rollback, competition for the final unit, concurrent requests with the same identity, simultaneous releases, both Reserve/Release orderings, and a deadline after a real commit.
+System tests reject order INSERTs using an actual PostgreSQL trigger and verify failed compensation and recovery by a fresh worker, crashes before order persistence, HTTP idempotency, order permissions, and product quantities.
+The system-test harness substitutes JWT identity while retaining the real RolesGuard. It is not a complete JWT login test.
 
 ## Docker Compose
 
-بعد تعبئة متغيرات Compose في ملفك المحلي وتثبيت Main في المسار المجاور:
+Fill in the Compose environment variables in your local file and keep Main in the adjacent directory:
 
 ```powershell
 docker compose -f compose.yaml up --build -d
 docker compose -f compose.yaml logs -f api inventory
 ```
 
-الترتيب هو: PostgreSQL صحي → migrations لكل قاعدة → Inventory صحي → Main API.
-الخدمتان تستخدمان مستخدمين وقاعدتين مستقلتين على نفس PostgreSQL server.
-عنوان Main الداخلي للمخزون هو `inventory:50051`. منفذ gRPC وقاعدة البيانات غير منشورين على المضيف؛ HTTP منشور على `127.0.0.1:3000` لربطه بـ reverse proxy.
-تهيئة المستخدمين/القواعد تعمل عند إنشاء volume جديد فقط. مع volume موجود جهّز الحسابات والقواعد إدارياً؛ لا تحذف volume لإصلاح الإعداد.
+Startup order is: healthy PostgreSQL → migrations for each database → healthy Inventory → Main API.
+The applications use separate accounts and databases on the same PostgreSQL server.
+Main reaches Inventory at `inventory:50051`. Neither the gRPC port nor the database port is published to the host; HTTP is bound to `127.0.0.1:3000` for a reverse proxy.
+Account/database initialization runs only when a new volume is created. With an existing volume, provision the accounts and databases administratively; do not delete the volume to fix configuration.
 
 ```powershell
-# بعد إنشاء منتجي الكتالوج 1 و2، تجهيز مخزونهما فقط:
+# After creating catalogue products 1 and 2, provision their stock records:
 docker compose -f compose.yaml exec inventory node scripts/seed-stock.cjs 1:20 2:10
 ```
 
-لم يتم نشر أي شيء على Azure. راجع [ملاحظات التنفيذ والمرجع](docs/implementation-review.md) لمعرفة القرارات والحدود.
+Nothing was deployed to Azure. See the [implementation and reference review](docs/implementation-review.md) for design decisions and remaining limitations.
