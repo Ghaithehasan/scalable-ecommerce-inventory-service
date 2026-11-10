@@ -1,0 +1,29 @@
+services:
+  inventory-migrate:
+    build: .
+    image: inventory-service:prod
+    env_file:
+      - .env.production
+    command:
+      - node
+      - node_modules/typeorm/cli.js
+      - migration:run
+      - -d
+      - dist/database/data-source.js
+    profiles:
+      - migrate
+
+  inventory:
+    build: .
+    image: inventory-service:prod
+    env_file:
+      - .env.production
+    ports:
+      - "10.1.1.5:50051:50051"
+    healthcheck:
+      test: ["CMD", "node", "scripts/healthcheck.cjs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
