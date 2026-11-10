@@ -58,6 +58,8 @@ npm.cmd run seed:stock -- 1:20 2:10
 
 This command inserts missing records only. It preserves existing quantities and does not run automatically at startup.
 
+For the matching eight-product demo catalogue, use the Main seed and exported ID manifest described in [docs/demo-seeding.md](docs/demo-seeding.md). The demo seed is manual and preserves stock already changed by orders.
+
 ## Contract and ownership
 
 `proto/inventory.proto` is the authoritative contract. Main has an identical copy at `../e-commerce/proto/inventory.proto`.

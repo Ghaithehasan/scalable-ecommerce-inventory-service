@@ -15,6 +15,7 @@ COPY --from=builder /app/dist ./dist
 COPY proto ./proto
 COPY scripts/healthcheck.cjs ./scripts/healthcheck.cjs
 COPY scripts/seed-stock.cjs ./scripts/seed-stock.cjs
+COPY scripts/seed-demo.cjs ./scripts/seed-demo.cjs
 USER node
 EXPOSE 50051
 CMD ["node", "dist/main.js"]

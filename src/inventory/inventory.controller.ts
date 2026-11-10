@@ -11,20 +11,38 @@ import type {
 @Controller()
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
+  
+  
+  
   @GrpcMethod('InventoryService', 'GetStock')
-  getStock(request: GetStockRequest) {
+  getStock(request: GetStockRequest) 
+  {
     return this.inventoryService.getStock(request?.productId);
   }
+
+
+
   @GrpcMethod('InventoryService', 'GetStocks')
-  getStocks(request: GetStocksRequest) {
+  getStocks(request: GetStocksRequest) 
+  {
     return this.inventoryService.getStocks(request?.productIds ?? []);
   }
+  
+  
   @GrpcMethod('InventoryService', 'ReserveStock')
-  reserveStock(request: ReserveStockRequest) {
+  reserveStock(request: ReserveStockRequest) 
+  {
     return this.inventoryService.reserveStock(request);
   }
+  
+  
+  
   @GrpcMethod('InventoryService', 'ReleaseStock')
-  releaseStock(request: ReleaseStockRequest) {
+  releaseStock(request: ReleaseStockRequest) 
+  {
     return this.inventoryService.releaseStock(request?.reservationId);
   }
+
+
+
 }

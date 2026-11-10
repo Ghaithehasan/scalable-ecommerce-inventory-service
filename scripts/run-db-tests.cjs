@@ -149,7 +149,11 @@ function binaries() {
         env,
       );
     }
-    const files = inventoryOnly ? ['test/inventory.e2e-spec.ts'] : [];
+    const files = inventoryOnly
+      ? ['test/inventory.e2e-spec.ts']
+      : process.argv.includes('--demo-seeds-only')
+        ? ['test/demo-seeds.e2e-spec.ts']
+        : [];
     run(
       process.execPath,
       [
