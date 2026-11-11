@@ -25,6 +25,16 @@ x-main-env: &main-env
   PORT: 3000
 
 services:
+  redis:
+    image: redis:8.8.4-alpine
+    command: [redis-server, --save, '', --appendonly, 'no', --maxmemory, 128mb, --maxmemory-policy, allkeys-lru]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+    restart: unless-stopped
+
   postgres:
     image: postgres:17-alpine
     environment:
@@ -97,12 +107,17 @@ services:
 
   api:
     image: ecommerce-local
-    environment: *main-env
+    environment:
+      <<: *main-env
+      REDIS_URL: redis://redis:6379
+      PRODUCT_CACHE_TTL_SECONDS: ${PRODUCT_CACHE_TTL_SECONDS:-60}
     ports: ['127.0.0.1:${API_PORT:-3000}:3000']
     depends_on:
       main-migrate:
         condition: service_completed_successfully
       inventory:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 

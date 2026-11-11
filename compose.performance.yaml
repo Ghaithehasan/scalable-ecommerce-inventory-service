@@ -1,0 +1,21 @@
+# Local-only overlay. Normal compose.local.yaml keeps the normal API rate limit.
+services:
+  api:
+    environment:
+      HTTP_RATE_LIMIT: '20000'
+
+  k6:
+    image: grafana/k6:2.3.0
+    profiles: [performance]
+    volumes:
+      - ../e-commerce/performance:/scripts:ro
+    environment:
+      BASE_URL: http://api:3000
+      K6_MANAGER_EMAIL: ${K6_MANAGER_EMAIL:-perf.v1.manager@example.com}
+      K6_MANAGER_PASSWORD: ${K6_MANAGER_PASSWORD:-}
+      K6_PROFILE: ${K6_PROFILE:-smoke}
+      ORDERS_VUS: ${ORDERS_VUS:-5}
+      ORDERS_DURATION: ${ORDERS_DURATION:-30s}
+      K6_MIN_ORDERS: ${K6_MIN_ORDERS:-1000}
+      K6_LABEL: ${K6_LABEL:-before-small}
+    command: [run, --quiet, --no-color, /scripts/orders.k6.js]
